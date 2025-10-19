@@ -3,9 +3,11 @@ using System.Drawing;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
+using System.Threading.Tasks;
 using AForge.Video;
 using AForge.Video.DirectShow;
 using ZXing;
+using ZXing.Common;
 using ZXing.Windows.Compatibility; // 追加
 
 namespace QrAttendanceScanner
@@ -40,12 +42,29 @@ namespace QrAttendanceScanner
         private VideoCaptureDevice? videoSource;
         private ZXing.BarcodeReader<Bitmap>? qrReader; // private BarcodeReader? qrReader; のままでOK
 
+        // デコード制御用
+        private volatile bool isDecoding = false;
+        private DateTime lastDecodeTime = DateTime.MinValue;
+        private readonly TimeSpan decodeInterval = TimeSpan.FromMilliseconds(300); // 200msごとに1回デコード
+        private readonly object qrReaderLock = new object();
+
         public MainWindow()
         {
             InitializeComponent();
             this.Loaded += MainWindow_Loaded;
             this.Closed += MainWindow_Closed;
-            qrReader = new ZXing.BarcodeReader<Bitmap>(null, (bitmap) => new ZXing.Windows.Compatibility.BitmapLuminanceSource(bitmap), null);
+
+            // BarcodeReader を一度だけ生成して再利用する
+            qrReader = new ZXing.BarcodeReader<Bitmap>(null, (bitmap) => new ZXing.Windows.Compatibility.BitmapLuminanceSource(bitmap), null)
+            {
+                Options = new DecodingOptions
+                {
+                    PossibleFormats = new System.Collections.Generic.List<BarcodeFormat> { BarcodeFormat.QR_CODE },
+                    TryHarder = false,
+                    TryInverted = false
+                },
+                AutoRotate = false
+            };
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -141,18 +160,47 @@ namespace QrAttendanceScanner
             // 映像フレームをBitmapとしてコピー
             Bitmap bitmap = (Bitmap)eventArgs.Frame.Clone();
 
-            // UIスレッドで処理を行う
-            Application.Current.Dispatcher.Invoke(() =>
+            // UI用に別のクローンを作り、UI更新を非ブロッキングで行う
+            Bitmap uiBitmap = (Bitmap)bitmap.Clone();
+
+            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
             {
                 // 1. 映像をWPFのImageコントロールに表示
-                CameraImage.Source = BitmapConverter.ToBitmapSource(bitmap);
+                CameraImage.Source = BitmapConverter.ToBitmapSource(uiBitmap);
 
-                // 2. 映像フレームをQRコードデコード関数に渡す
-                DecodeQrCode(bitmap);
-            });
+                // BitmapSource化が完了したらBitmapを破棄
+                uiBitmap.Dispose();
+            }));
 
-            // 3. Bitmapオブジェクトを解放
-            bitmap.Dispose();
+            // 2. デコードはバックグラウンドで行う（スロットリング）
+            var now = DateTime.UtcNow;
+            if (!isDecoding && (now - lastDecodeTime) > decodeInterval)
+            {
+                isDecoding = true;
+                lastDecodeTime = now;
+
+                // デコード用のBitmapは別インスタンス（bitmap）を使う
+                Bitmap decodeBitmap = bitmap; // reuse one of the clones
+
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        DecodeQrCode(decodeBitmap);
+                    }
+                    finally
+                    {
+                        // DecodeQrCodeではBitmapを破棄しないためここで破棄
+                        try { decodeBitmap.Dispose(); } catch { }
+                        isDecoding = false;
+                    }
+                });
+            }
+            else
+            {
+                // デコードしない場合はクローンを破棄
+                bitmap.Dispose();
+            }
         }
 
         /// <summary>
@@ -162,25 +210,54 @@ namespace QrAttendanceScanner
         {
             try
             {
-                // ZXingリーダーでQRコードを読み取る
-                var result = new BarcodeReader().Decode(bitmap); // ← 修正: binaryBitmapではなくbitmapを渡す
+                if (qrReader == null) return;
+
+                // スレッドセーフにqrReaderを使用
+                Result? result = null;
+                lock (qrReaderLock)
+                {
+                    result = qrReader.Decode(bitmap);
+                }
 
                 if (result != null)
                 {
-                    // QRコードが正常に読み取られた場合
                     string scannedData = result.Text;
 
-                    // 即座にUI上のTextBoxに出力
-                    ResultTextBox.Text = scannedData;
-
-                    // 成功後の処理を実行
-                    ProcessAttendance(scannedData);
+                    // UIスレッドで結果表示と後処理を行う
+                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ResultTextBox.Text = scannedData;
+                        ProcessAttendance(scannedData);
+                    }));
                 }
             }
             catch (Exception)
             {
                 // デコード中に発生する可能性のあるエラーは無視する
             }
+        }
+
+        /// <summary>
+        /// スキャン成功時にTextBoxの背景色を一時的に変更し、フィードバックを与える
+        /// </summary>
+        private async void ShowSuccessFeedbackAsync(string data)
+        {
+            // C#でWPFのBrushを定義
+            var successColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(255, 144, 238, 144)); // LightGreen
+            var initialColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(255, 239, 239, 239)); // #EFEFEF
+
+            // 1. テキストボックスの背景色を成功色に変更
+            ResultTextBox.Background = successColor;
+            ResultTextBox.Foreground = System.Windows.Media.Brushes.White;
+            ResultTextBox.Text = $"✅ 出席確認完了: {data}";
+
+            // 2. 1.5秒待機
+            await Task.Delay(1500);
+
+            // 3. 元の色に戻す
+            ResultTextBox.Background = initialColor;
+            ResultTextBox.Foreground = System.Windows.Media.Brushes.Black;
+            ResultTextBox.Text = "QRコードをスキャンしてください...";
         }
 
         /// <summary>
@@ -191,6 +268,18 @@ namespace QrAttendanceScanner
         {
             // ここに、出席管理アプリのコアロジックを実装します。
             // 例: スキャン成功後の確認メッセージやデータベースへの記録など
+            // ★★★ 修正箇所: スキャンされた情報をポップアップで出力 ★★★
+
+            // UI/UX改善ステップで追加したフィードバックを呼び出す (成功時の緑色表示など)
+            ShowSuccessFeedbackAsync(data);
+
+            // QRコードの内容を確認するためのポップアップ表示
+            MessageBox.Show(
+                $"出席データを受信しました:\n\n{data}",
+                "✅ QRコードスキャン成功",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
         }
 
         // ... (MainWindowクラスの終わり)

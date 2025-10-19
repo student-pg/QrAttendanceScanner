@@ -6,7 +6,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+	<NoWarn>$(NoWarn);NU1701</NoWarn>
+    <!-- Disable auto generation of assembly attributes to prevent duplicates when adding benchmark project -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
+
+  <!-- Exclude benchmark project files from this WPF project compile set -->
+  <ItemGroup>
+    <Compile Remove="BenchmarkSuite1\**\*.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AForge" Version="2.2.5" />
