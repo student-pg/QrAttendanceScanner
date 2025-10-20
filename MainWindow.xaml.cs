@@ -1,11 +1,14 @@
-﻿using System;
+﻿// C#の最も基本的な機能群
+using System;
 using System.Drawing;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Threading.Tasks;
+// カメラフレーム取得用・操作用ライブラリ
 using AForge.Video;
 using AForge.Video.DirectShow;
+//QRコードデコード用ライブラリ
 using ZXing;
 using ZXing.Common;
 using ZXing.Windows.Compatibility; // 追加
