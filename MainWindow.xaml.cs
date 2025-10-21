@@ -5,7 +5,8 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Threading.Tasks;
-// カメラフレーム取得用・操作用ライブラリ
+using System.Windows.Controls; // ComboBox, Button を使うために追加
+// カメラフレーム取得用ライブラリ
 using AForge.Video;
 using AForge.Video.DirectShow;
 //QRコードデコード用ライブラリ
@@ -72,7 +73,7 @@ namespace QrAttendanceScanner
     {
         private FilterInfoCollection? videoDevices;
         private VideoCaptureDevice? videoSource;
-        private ZXing.BarcodeReader<Bitmap>? qrReader; // private BarcodeReader? qrReader; のままでOK
+        private ZXing.BarcodeReader<Bitmap>? qrReader;
 
         // デコード制御用
         private volatile bool isDecoding = false;
@@ -99,102 +100,112 @@ namespace QrAttendanceScanner
             };
         }
 
+        // =================================================================
+        // ★★★ 変更点 1: ウィンドウロード時の処理 ★★★
+        // =================================================================
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            InitializeCamera();
+            // アプリ起動時にカメラを列挙してComboBoxに表示する
+            EnumerateCameras();
         }
 
-        private void InitializeCamera()
+        /// <summary>
+        /// PCに接続されているカメラデバイスをすべて検出し、ComboBoxに設定します。
+        /// </summary>
+        private void EnumerateCameras()
         {
             try
             {
                 // 接続されているカメラデバイスのリストを取得
                 videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
+                if (videoDevices.Count == 0)
+                {
+                    // カメラが見つからない場合
+                    ResultTextBox.Text = "使用可能なカメラが見つかりません。";
+                    StartCameraButton.IsEnabled = false; // ボタンを無効化
+                    return;
+                }
+
+                // 見つかったカメラの名前をComboBoxに追加
+                foreach (FilterInfo device in videoDevices)
+                {
+                    CameraComboBox.Items.Add(device.Name);
+                }
+                CameraComboBox.SelectedIndex = 0; // 最初のカメラを選択状態にする
+                StartCameraButton.IsEnabled = true; // ボタンを有効化
             }
             catch (Exception ex)
             {
-                // カメラデバイスの列挙中にエラーが発生した場合
-                ShowCameraError("カメラデバイスの列挙中にエラーが発生しました: " + ex.Message);
-                return;
+                ShowCameraError("カメラの検出中にエラーが発生しました: " + ex.Message);
             }
+        }
 
-            // 💡 カメラ非搭載時の処理
-            if (videoDevices == null || videoDevices.Count == 0)
+        // =================================================================
+        // ★★★ 変更点 2: ボタンクリック時の処理（新規作成） ★★★
+        // =================================================================
+        /// <summary>
+        /// 「スキャン開始」ボタンがクリックされたときに呼び出されます。
+        /// </summary>
+        private void StartCameraButton_Click(object sender, RoutedEventArgs e)
+        {
+            // 既にカメラが起動していれば、一度停止する
+            StopCamera();
+
+            if (CameraComboBox.SelectedIndex == -1 || videoDevices == null)
             {
-                ShowCameraError("PCにカメラ機能が搭載されていません。");
-                return;
+                return; // 選択肢がない、またはカメラリストがなければ何もしない
             }
 
             try
             {
-                // 最初のカメラデバイスを選択し、ストリームを開始
-                videoSource = new VideoCaptureDevice(videoDevices[0].MonikerString);
+                // ComboBoxで選択されているカメラの情報を取得
+                int selectedIndex = CameraComboBox.SelectedIndex;
+                string monikerString = videoDevices[selectedIndex].MonikerString;
+
+                // 選択されたカメラで映像ストリームを開始
+                videoSource = new VideoCaptureDevice(monikerString);
                 videoSource.NewFrame += new NewFrameEventHandler(VideoSource_NewFrame);
                 videoSource.Start();
 
-                // 映像エリアのUIをリセット (カメラが接続された場合)
-                CameraImage.Source = null;
+                // ボタンの文言を変更
+                StartCameraButton.Content = "カメラ切替";
             }
             catch (Exception ex)
             {
-                ShowCameraError("カメラの初期化または起動中にエラーが発生しました: " + ex.Message);
+                ShowCameraError($"カメラの起動に失敗しました: {ex.Message}");
             }
         }
 
+        // =================================================================
+        // ★★★ 変更点 3: カメラ停止処理（新規作成＆共通化） ★★★
+        // =================================================================
         /// <summary>
-        /// カメラ接続失敗時または非搭載時にUIを更新する
+        /// 現在動作しているカメラを安全に停止します。
         /// </summary>
-        /// <param name="message">表示するエラーメッセージ</param>
-        private void ShowCameraError(string message)
+        private void StopCamera()
         {
-            // カメラ映像エリアにエラーメッセージを表示するためのTextBlockを動的に生成
-            var textBlock = new System.Windows.Controls.TextBlock
+            if (videoSource != null && videoSource.IsRunning)
             {
-                Text = "カメラに接続できません。\n" + message,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                TextAlignment = TextAlignment.Center,
-                FontSize = 16,
-                Foreground = System.Windows.Media.Brushes.Gray
-            };
-
-            // Imageコントロール（CameraImage）の親要素であるBorderにTextBlockを設定
-            // Imageコントロールは非表示にするか、親要素にTextBlockを直接追加
-            if (CameraImage.Parent is System.Windows.Controls.Border parentBorder)
-            {
-                parentBorder.Child = textBlock;
-                parentBorder.Background = System.Windows.Media.Brushes.White;
+                videoSource.SignalToStop();
+                // NewFrameイベントの購読を解除 (重要)
+                videoSource.NewFrame -= VideoSource_NewFrame;
+                videoSource.WaitForStop();
+                videoSource = null;
             }
-            else
-            {
-                // 親要素がBorderでない場合のフォールバック（今回はBorderを想定）
-                CameraImage.Source = null;
-                ResultTextBox.Text = message;
-            }
-
-            ResultTextBox.Text = message;
         }
 
         private void MainWindow_Closed(object? sender, EventArgs e)
         {
             // アプリケーション終了時にカメラを停止
-            if (videoSource != null && videoSource.IsRunning)
-            {
-                videoSource.SignalToStop();
-                videoSource.WaitForStop();
-            }
+            StopCamera();
         }
 
         private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs)
         {
-            // 新しいフレーム（画像）が届いた
+            Bitmap originalBitmap = (Bitmap)eventArgs.Frame.Clone();
+            originalBitmap.RotateFlip(RotateFlipType.RotateNoneFlipX); // 左右反転
 
-            // 映像フレームをBitmapとしてコピー
-            Bitmap bitmap = (Bitmap)eventArgs.Frame.Clone();
-
-            // UI用に別のクローンを作り、UI更新を非ブロッキングで行う
-            Bitmap uiBitmap = (Bitmap)bitmap.Clone();
-
+            Bitmap uiBitmap = (Bitmap)originalBitmap.Clone();
             Application.Current.Dispatcher.BeginInvoke(new Action(() =>
             {
                 // 1. 映像をWPFのImageコントロールに表示
@@ -210,10 +221,7 @@ namespace QrAttendanceScanner
             {
                 isDecoding = true;
                 lastDecodeTime = now;
-
-                // デコード用のBitmapは別インスタンス（bitmap）を使う
-                Bitmap decodeBitmap = bitmap; // reuse one of the clones
-
+                Bitmap decodeBitmap = originalBitmap;
                 Task.Run(() =>
                 {
                     try
@@ -230,9 +238,36 @@ namespace QrAttendanceScanner
             }
             else
             {
-                // デコードしない場合はクローンを破棄
-                bitmap.Dispose();
+                originalBitmap.Dispose();
             }
+        }
+
+        // (ShowCameraError, DecodeQrCode, ProcessAttendanceなどのメソッドは変更なし)
+        #region Unchanged Methods
+        private void ShowCameraError(string message)
+        {
+            var textBlock = new System.Windows.Controls.TextBlock
+            {
+                Text = "カメラに接続できません。\n" + message,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                FontSize = 16,
+                Foreground = System.Windows.Media.Brushes.Gray
+            };
+
+            if (CameraImage.Parent is System.Windows.Controls.Border parentBorder)
+            {
+                parentBorder.Child = textBlock;
+                parentBorder.Background = System.Windows.Media.Brushes.White;
+            }
+            else
+            {
+                CameraImage.Source = null;
+                ResultTextBox.Text = message;
+            }
+
+            ResultTextBox.Text = message;
         }
 
         /// <summary>
@@ -316,4 +351,7 @@ namespace QrAttendanceScanner
 
         // ... (MainWindowクラスの終わり)
     }
+
+    #endregion
+
 }
