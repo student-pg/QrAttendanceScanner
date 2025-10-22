@@ -126,6 +126,7 @@ public partial class MainWindow : Window
         // ... コンストラクタ（初期化処理） ...
     }
 }
+```
 
 #### **フィールド（クラスが内部で保持する情報）**
 
@@ -154,6 +155,7 @@ public MainWindow()
     // 3. QRコードリーダーを初期化
     qrReader = new ZXing.BarcodeReader<Bitmap>(...) { ... };
 }
+```
 
 1.  **`InitializeComponent()`**: XAML（画面のデザインを記述するファイル）で定義されたボタンや画像表示エリアなどの部品を、プログラムで使えるように初期化するおまじないです。
 2.  **イベントハンドラの登録**:
