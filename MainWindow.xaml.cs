@@ -62,7 +62,7 @@ namespace QrAttendanceScanner
         // コンストラクタ
         public MainWindow()
         {
-            // 
+            // XAMLで定義されたUIコンポーネントを初期化
             InitializeComponent();
             // += でイベントハンドラを登録
             this.Loaded += MainWindow_Loaded;
