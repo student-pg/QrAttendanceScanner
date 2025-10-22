@@ -20,41 +20,18 @@ namespace QrAttendanceScanner
     public static class BitmapConverter
     {
         // GDIオブジェクトを解放するためのDLLインポート
-        // Windowsシステムの心臓部に近い機能（`gdi32.dll`というファイルの中にある`DeleteObject`という機能）を直接呼び出す
-        // これを使わないと、メモリリーク（不要なメモリが解放されずに溜まっていく現象）が発生する可能性がある
-        // `DllImport`属性は、C#のコードとネイティブコード（C/C++で書かれたコード）を橋渡しするためのもの
-        // つまり、C#から直接WindowsのAPIを呼び出せるようにする
-        // `extern`キーワードは、このメソッドが外部で定義されていることを示す
-        // `bool`は、この関数が成功したかどうかを示す真偽値を返すことを意味する
-        // 注意: .NET 6以降では、`System.Runtime.InteropServices`名前空間が必要です
-        // 注意: 64ビット環境と32ビット環境でのポインタサイズの違いに注意してください
-        // 注意: このコードはWPFアプリケーションでのみ使用してください。WinFormsアプリケーションでは異なる方法で画像を扱います
-        // 注意: GDIオブジェクトの解放は、使用後すぐに行うことが推奨されます
-        // 注意: このコードはWindowsの特定のバージョンでのみ動作する可能性があります
         [System.Runtime.InteropServices.DllImport("gdi32.dll")]
-        // DeleteObject関数の宣言その引数について
-        // `IntPtr`はポインタを表す型で、C#でネイティブリソースを扱う際に使われる
-        // hObject: GDIが管理するグラフィックオブジェクト（画像、ペン、ブラシなど）のハンドル。
-        // <param name="hObject">解放するGDIオブジェクトのハンドル</param>
-        // 参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.intptr
-        // 参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.runtime.interopservices.dllimportattribute
         public static extern bool DeleteObject(IntPtr hObject);
 
         // GDI+のBitmapをWPFのBitmapSourceに変換するメソッド(翻訳機)
-        // <param name="bitmap">変換するGDI+のBitmapオブジェクト</param>
         public static BitmapSource ToBitmapSource(Bitmap bitmap)
         {
             // BitmapオブジェクトからHBITMAPハンドルを取得
-            // GetHbitmapメソッドは、bitmapオブジェクトからWindowsのネイティブなビットマップオブジェクト（HBITMAP）を取得する
             var hBitmap = bitmap.GetHbitmap();
             try
             {
-                // CreateBitmapSourceFromHBitmapメソッドは、HBITMAPハンドルをWPFのBitmapSourceオブジェクトに変換する
                 // Int32Rect.Emptyは、ビットマップ全体を使用することを示す
                 // BitmapSizeOptions.FromEmptyOptions()は、デフォルトのサイズオプションを使用することを示す
-                // 参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.interop.imaging.createbitmapsourcefromhbitmap
-                // 参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.int32rect
-                // 参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.media.imaging.bitmapsizeoptions
                 return Imaging.CreateBitmapSourceFromHBitmap(
                     hBitmap,// ビットマップハンドル
                     IntPtr.Zero, // パレットハンドル（通常はゼロ、意味：特別な設定は不要）

@@ -31,22 +31,22 @@ public static class BitmapConverter
         // ...
     }
 }
+```
 
 #### **なぜこのクラスが必要なのか？**
 
-このアプリは**WPF (Windows Presentation Foundation)** という技術で作られています。WPFは比較的新しい画面表示の仕組みで、画像を扱うときは`BitmapSource`という形式を使います。
+このアプリは**WPF (Windows Presentation Foundation)** という技術で作られています。<br>
+WPFは比較的新しい画面表示の仕組みで、画像を扱うときは`BitmapSource`という形式を使います。
 
-一方で、`AForge`ライブラリがカメラから取得してくる画像の形式は、古くから使われている`System.Drawing.Bitmap`（`Bitmap`と略されます）です。
+一方で、`AForge`ライブラリがカメラから取得してくる画像の形式は、古くから使われている<br>
+`System.Drawing.Bitmap`（`Bitmap`と略されます）です。
 
 つまり、
 * **カメラがくれる画像形式**: `Bitmap`
 * **WPFの画面に表示できる画像形式**: `BitmapSource`
 
-この2つは**互換性がなく、そのままでは表示できません**。そこで、`Bitmap`を`BitmapSource`に変換する「**翻訳機**」が必要になります。それがこの`BitmapConverter`クラスの役割です。
-
-
-
-[Image of a diagram showing data conversion]
+この2つは**互換性がなく、そのままでは表示できません**。そこで、`Bitmap`を`BitmapSource`に変換する<bt>
+「**翻訳機**」が必要になります。それがこの`BitmapConverter`クラスの役割です。
 
 
 #### **コードの深掘り**
@@ -54,10 +54,32 @@ public static class BitmapConverter
 ```csharp
 [System.Runtime.InteropServices.DllImport("gdi32.dll")]
 public static extern bool DeleteObject(IntPtr hObject);
+```
 
-これは少し高度な部分です。C#は通常、安全な環境で動作しますが、ここではWindowsシステムの心臓部に近い機能（`gdi32.dll`というファイルの中にある`DeleteObject`という機能）を直接呼び出しています。
+これは少し高度な部分です。C#は通常、安全な環境で動作しますが、ここではWindowsシステムの心臓部に近い機能<br>
+（`gdi32.dll`というファイルの中にある`DeleteObject`という機能）を直接呼び出しています。<br>
+`DllImport`属性は、C#から直接WindowsのAPIを呼び出せるようにします。
 
-`Bitmap`画像を`BitmapSource`に変換する際、一時的にOS（Windows）のメモリ上に画像データを作成します。C#は、自分で使ったメモリは自動的に掃除してくれますが、OSに直接お願いして作ってもらったメモリは、自分で「**掃除してください**」とお願いしないと、ゴミとして残り続けてしまいます。この`DeleteObject`は、そのお掃除をお願いするための命令です。
+`Bitmap`画像を`BitmapSource`に変換する際、一時的にOS（Windows）のメモリ上に画像データを作成します。<br>
+C#は、自分で使ったメモリは自動的に掃除してくれますが、OSに直接お願いして作ってもらったメモリは、<br>
+自分で「**掃除してください**」とお願いしないと、ゴミとして残り続けてしまいます。<br>
+この`DeleteObject`は、そのお掃除をお願いするための命令です。
+(**メモリリーク** 対策)
+
+* `extern`キーワードは、このメソッドが外部で定義されていることを示す
+* `bool`は、この関数が成功したかどうかを示す真偽値を返すことを意味する
+* `IntPtr hObject`は、削除したいGDIオブジェクトのハンドル（ポインタ）を受け取る引数であることを示す
+
+
+注意: .NET 6以降では、`System.Runtime.InteropServices`名前空間が必要です<br>
+注意: 64ビット環境と32ビット環境でのポインタサイズの違いに注意してください<br>
+注意: このコードはWPFアプリケーションでのみ使用してください。<br>
+WinFormsアプリケーションでは異なる方法で画像を扱います<br>
+注意: GDIオブジェクトの解放は、使用後すぐに行うことが推奨されます<br>
+注意: このコードはWindowsの特定のバージョンでのみ動作する可能性があります<br>
+
+参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.intptr <br>
+参考: https://learn.microsoft.com/ja-jp/dotnet/api/system.runtime.interopservices.dllimportattribute
 
 ```csharp
 public static BitmapSource ToBitmapSource(Bitmap bitmap)
@@ -74,8 +96,19 @@ public static BitmapSource ToBitmapSource(Bitmap bitmap)
         DeleteObject(hBitmap);
     }
 }
+```
+このメソッドは、`Bitmap`を`BitmapSource`に変換するためのものです。<br>
+1. **`bitmap.GetHbitmap()`**: ここで、OSのメモリ上に`Bitmap`画像を作成し、<br>
+その場所を指すハンドル（`hBitmap`）を取得します。
+1. **`Imaging.CreateBitmapSourceFromHBitmap(...)`**: 取得した`hBitmap`を使って、<br>
+WPFで使える`BitmapSource`画像を生成します。
+1. **`DeleteObject(hBitmap)`**: 最後に、`finally`ブロックの中で、<br>
+で作成したOSのメモリを必ず掃除します。
 
-* **`try...finally`構文**: `try`の中の処理で、もしエラーが発生したとしても、`finally`の中に書かれた処理は**必ず実行される**、という非常に重要な構文です。ここでは、変換に失敗しても絶対にメモリの掃除は行う、という強い意志の表れです。これがないと、アプリを長時間動かしているとメモリリーク（ゴミが溜まり続けてPCが重くなる現象）の原因になります。
+* **`try...finally`構文**: `try`の中の処理で、もしエラーが発生したとしても、<br>
+`finally`の中に書かれた処理は**必ず実行される**、という非常に重要な構文です。<br>
+ここでは、変換に失敗しても絶対にメモリの掃除は行う、という強い意志の表れです。<br>
+これがないと、アプリを長時間動かしているとメモリリーク（ゴミが溜まり続けてPCが重くなる現象）の原因になります。
 
 ---
 
