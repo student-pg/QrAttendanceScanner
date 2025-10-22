@@ -48,19 +48,23 @@ namespace QrAttendanceScanner
 
     public partial class MainWindow : Window
     {
-        private FilterInfoCollection? videoDevices;
-        private VideoCaptureDevice? videoSource;
-        private ZXing.BarcodeReader<Bitmap>? qrReader;
+        // カメラ関連フィールド
+        private FilterInfoCollection? videoDevices;// 接続されているカメラデバイスのリスト
+        private VideoCaptureDevice? videoSource;// 選択されたカメラデバイス
+        private ZXing.BarcodeReader<Bitmap>? qrReader;// QRコードリーダー
 
         // デコード制御用
-        private volatile bool isDecoding = false;
-        private DateTime lastDecodeTime = DateTime.MinValue;
-        private readonly TimeSpan decodeInterval = TimeSpan.FromMilliseconds(300); // 200msごとに1回デコード
-        private readonly object qrReaderLock = new object();
+        private volatile bool isDecoding = false;// デコード中フラグ
+        private DateTime lastDecodeTime = DateTime.MinValue;// 最後にデコードを試みた時間
+        private readonly TimeSpan decodeInterval = TimeSpan.FromMilliseconds(300); // デコード試行間隔
+        private readonly object qrReaderLock = new object();// qrReaderのスレッドセーフ用ロックオブジェクト
 
+        // コンストラクタ
         public MainWindow()
         {
+            // 
             InitializeComponent();
+            // += でイベントハンドラを登録
             this.Loaded += MainWindow_Loaded;
             this.Closed += MainWindow_Closed;
 
@@ -77,18 +81,15 @@ namespace QrAttendanceScanner
             };
         }
 
-        // =================================================================
-        // ★★★ 変更点 1: ウィンドウロード時の処理 ★★★
-        // =================================================================
+
+        // コンストラクタ内でイベントハンドラを登録済み。ウィンドウがロードされたときに呼び出される。
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // アプリ起動時にカメラを列挙してComboBoxに表示する
             EnumerateCameras();
         }
 
-        /// <summary>
-        /// PCに接続されているカメラデバイスをすべて検出し、ComboBoxに設定します。
-        /// </summary>
+        // PCに接続されているカメラデバイスをすべて検出し、ComboBoxに設定します。
         private void EnumerateCameras()
         {
             try
@@ -117,12 +118,8 @@ namespace QrAttendanceScanner
             }
         }
 
-        // =================================================================
-        // ★★★ 変更点 2: ボタンクリック時の処理（新規作成） ★★★
-        // =================================================================
-        /// <summary>
-        /// 「スキャン開始」ボタンがクリックされたときに呼び出されます。
-        /// </summary>
+
+        // 「スキャン開始」ボタンがクリックされたときに呼び出されます。
         private void StartCameraButton_Click(object sender, RoutedEventArgs e)
         {
             // 既にカメラが起動していれば、一度停止する
@@ -153,12 +150,8 @@ namespace QrAttendanceScanner
             }
         }
 
-        // =================================================================
-        // ★★★ 変更点 3: カメラ停止処理（新規作成＆共通化） ★★★
-        // =================================================================
-        /// <summary>
-        /// 現在動作しているカメラを安全に停止します。
-        /// </summary>
+
+        // 現在動作しているカメラを安全に停止します。
         private void StopCamera()
         {
             if (videoSource != null && videoSource.IsRunning)
@@ -171,12 +164,14 @@ namespace QrAttendanceScanner
             }
         }
 
+        // アプリが終了する直前にカメラを停止するためのイベントハンドラ
         private void MainWindow_Closed(object? sender, EventArgs e)
         {
             // アプリケーション終了時にカメラを停止
             StopCamera();
         }
 
+        // カメラが新しいフレームを提供したときに呼び出されるイベントハンドラ
         private void VideoSource_NewFrame(object sender, NewFrameEventArgs eventArgs)
         {
             Bitmap originalBitmap = (Bitmap)eventArgs.Frame.Clone();
@@ -219,7 +214,8 @@ namespace QrAttendanceScanner
             }
         }
 
-        // (ShowCameraError, DecodeQrCode, ProcessAttendanceなどのメソッドは変更なし)
+
+        // エラー表示用メソッド
         #region Unchanged Methods
         private void ShowCameraError(string message)
         {
@@ -247,9 +243,7 @@ namespace QrAttendanceScanner
             ResultTextBox.Text = message;
         }
 
-        /// <summary>
-        /// 受け取ったBitmapからQRコードをデコードし、結果をUIに出力します。
-        /// </summary>
+        // 受け取ったBitmapからQRコードをデコードし、結果をUIに出力します。
         private void DecodeQrCode(Bitmap bitmap)
         {
             try
@@ -281,9 +275,7 @@ namespace QrAttendanceScanner
             }
         }
 
-        /// <summary>
         /// スキャン成功時にTextBoxの背景色を一時的に変更し、フィードバックを与える
-        /// </summary>
         private async void ShowSuccessFeedbackAsync(string data)
         {
             // C#でWPFのBrushを定義
@@ -304,9 +296,7 @@ namespace QrAttendanceScanner
             ResultTextBox.Text = "QRコードをスキャンしてください...";
         }
 
-        /// <summary>
-        /// スキャンされたデータを受け取り、出席管理のロジックを実行します。
-        /// </summary>
+        // スキャンされたデータを受け取り、出席管理のロジックを実行します。
         /// <param name="data">スキャンされたQRコードのデータ</param>
         private void ProcessAttendance(string data)
         {
